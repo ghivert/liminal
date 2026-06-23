@@ -3,6 +3,7 @@ import gleam/dict.{type Dict}
 import gleam/function
 import gleam/http
 import gleam/list
+import gleam/result
 import wisp.{type Request, type Response}
 
 pub opaque type Router {
@@ -120,22 +121,16 @@ pub fn handler(router: Router) -> fn(Request) -> Response {
 
 fn handle_request(router: Router, request, segments, params) {
   let method = get_request_method(request)
-  case dict.get(router.computed_handlers, method) {
-    Error(_) -> router.default_handler(request, params)
-    Ok(handlers) -> {
-      case find_matching_handler(handlers, segments, params) {
-        Error(_) -> router.default_handler(request, params)
-        Ok(#(params, [], LiminalHandler(handler:, ..))) -> {
-          use request, params <- respond(router, request, params)
-          handler(request, params)
-        }
-        Ok(#(_, [_, ..], LiminalHandler(..))) ->
-          router.default_handler(request, params)
-        Ok(#(params, segments, LiminalRouter(router:, ..))) -> {
-          use request, params <- respond(router, request, params)
-          handle_request(router, request, segments, params)
-        }
-      }
+  let handlers = dict.get(router.computed_handlers, method)
+  case result.try(handlers, find_matching_handler(_, segments, params)) {
+    Error(_) -> respond(router, request, params, router.default_handler)
+    Ok(#(params, [], LiminalHandler(handler:, ..))) ->
+      respond(router, request, params, handler)
+    Ok(#(_, [_, ..], LiminalHandler(..))) ->
+      respond(router, request, params, router.default_handler)
+    Ok(#(params, segments, LiminalRouter(..) as sub)) -> {
+      use request, params <- respond(router, request, params)
+      handle_request(sub.router, request, segments, params)
     }
   }
 }
