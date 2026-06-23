@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict.{type Dict}
 import gleam/function
 import gleam/http
@@ -32,7 +33,6 @@ pub type Params =
   Dict(String, String)
 
 pub fn router() -> Router {
-  let default_handler = fn(_, _) { wisp.not_found() }
   Router(
     pre_intercepters: [],
     post_intercepters: [],
@@ -73,15 +73,23 @@ pub fn after(
   })
 }
 
-pub fn context(router: Router, at at: List(String), route sub_router: Router) {
+pub fn context(router: Router, at at: List(String), router sub_router: Router) {
   Router(..router, handlers: {
-    let sub_router = LiminalRouter(at, compute(sub_router))
+    let sub_router = compute(sub_router)
+    let is_sub_default_handler = sub_router.default_handler == default_handler
+    let is_router_default_handler = router.default_handler == default_handler
+    let sub_router =
+      LiminalRouter(at:, router: {
+        use <- bool.guard(when: !is_sub_default_handler, return: sub_router)
+        use <- bool.guard(when: is_router_default_handler, return: sub_router)
+        Router(..sub_router, default_handler: router.default_handler)
+      })
     [sub_router, ..router.handlers]
   })
 }
 
 pub fn proxy(_to: String) -> Handler {
-  fn(_, _) { wisp.ok() }
+  fn(_, _) { todo }
 }
 
 pub fn get(router: Router, at: List(String), handler: Handler) {
@@ -103,6 +111,7 @@ pub fn post(router: Router, at: List(String), handler: Handler) {
 // }
 
 pub fn handler(router: Router) -> fn(Request) -> Response {
+  let router = compute(router)
   fn(request) {
     let parts = wisp.path_segments(request)
     handle_request(router, request, parts, dict.new())
@@ -230,6 +239,10 @@ fn keep_method(all_handlers, handlers, method: http.Method) {
       LiminalHandler(..), _ -> handler.method == method
     }
   })
+}
+
+fn default_handler(_, _) {
+  wisp.not_found()
 }
 // pub fn proxy_to(request: Request, path: String, endpoint: Uri) {
 //   wisp.read_body_bits(request)
